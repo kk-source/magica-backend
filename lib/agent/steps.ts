@@ -10,6 +10,15 @@ const LABELS: Record<string, string> = {
   merge_videos: "Merging videos",
 };
 
+// Past tense once a step has finished ("Loaded skill" vs "Loading skill").
+const DONE_LABELS: Record<string, string> = {
+  load_skill: "Loaded skill",
+  read_skill_asset: "Read skill file",
+  crop_image: "Cropped image",
+  gpt_image_2: "Generated image",
+  merge_videos: "Merged videos",
+};
+
 const truncate = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function keyArg(name: string, input: unknown): string | null {
@@ -38,10 +47,12 @@ export function toToolSteps(events: ToolEvent[], now = Date.now()): ToolStep[] {
     .filter((e) => e.type === "tool_start")
     .map((start) => {
       const end = ends.get(start.id);
-      const label =
-        start.name === "gpt_image_2" && (start.input as { input_images?: unknown[] })?.input_images?.length
-          ? "Editing image"
-          : (LABELS[start.name] ?? start.name);
+      const done = !!end && !end.error;
+      const editing =
+        start.name === "gpt_image_2" && !!(start.input as { input_images?: unknown[] })?.input_images?.length;
+      const label = editing
+        ? done ? "Edited image" : "Editing image"
+        : ((done ? DONE_LABELS : LABELS)[start.name] ?? start.name);
       return {
         label,
         boldArg: keyArg(start.name, start.input),

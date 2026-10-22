@@ -40,7 +40,10 @@ async function request<T>(path: string, init: RequestInit = {}, attempt = 0): Pr
   }
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
-    throw new Error(`Magica ${res.status}: ${body?.message ?? body?.error ?? res.statusText}`);
+    // Keep field-level details (e.g. validation issues) so the agent and logs see what was rejected.
+    const { message, error, ...details } = body ?? {};
+    const extra = Object.keys(details).length ? ` ${JSON.stringify(details).slice(0, 500)}` : "";
+    throw new Error(`Magica ${res.status}: ${message ?? error ?? res.statusText}${extra}`);
   }
   return (await res.json()) as T;
 }

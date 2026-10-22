@@ -35,19 +35,6 @@ function toChatMessages(
 export const agentRun = task({
   id: "agent-run",
   run: async ({ chatId, runId }: Payload, { signal }) => {
-    const history = await db.message.findMany({
-      where: { chatId },
-      orderBy: { createdAt: "desc" },
-      take: HISTORY_LIMIT,
-      include: { attachments: true },
-    });
-    const assistant = await db.message.create({
-      data: { chatId, role: "ASSISTANT", content: { text: "" }, status: "STREAMING" },
-    });
-    await db.agentRun.update({ where: { id: runId }, data: { status: "STREAMING", assistantMessageId: assistant.id } });
-    metadata.set("assistantMessageId", assistant.id);
-    metadata.set("status", "STREAMING");
-
     let text = "";
     const toolEvents: ToolEvent[] = [];
     let lastFlush = 0;
@@ -57,8 +44,24 @@ export const agentRun = task({
       metadata.set("text", text);
       metadata.set("tools", JSON.parse(JSON.stringify(toolEvents)));
     };
+    // Set once the assistant row exists; setup failures before that still mark the run FAILED.
+    let assistantId: string | undefined;
 
     try {
+      const history = await db.message.findMany({
+        where: { chatId },
+        orderBy: { createdAt: "desc" },
+        take: HISTORY_LIMIT,
+        include: { attachments: true },
+      });
+      const assistant = await db.message.create({
+        data: { chatId, role: "ASSISTANT", content: { text: "" }, status: "STREAMING" },
+      });
+      assistantId = assistant.id;
+      await db.agentRun.update({ where: { id: runId }, data: { status: "STREAMING", assistantMessageId: assistant.id } });
+      metadata.set("assistantMessageId", assistant.id);
+      metadata.set("status", "STREAMING");
+
       for await (const ev of runAgent({ messages: toChatMessages(history.reverse()), runId, signal })) {
         if (ev.type === "text") text += ev.delta;
         else if (ev.type !== "done") toolEvents.push(ev);
@@ -95,13 +98,19 @@ export const agentRun = task({
       logger.error("agent run failed", { error, cancelled });
       const status = cancelled ? "CANCELLED" : "FAILED";
       metadata.set("status", status);
-      await db.$transaction([
-        db.message.update({
-          where: { id: assistant.id },
-          data: { content: { text, tools: toolEvents } as Prisma.InputJsonValue, status },
-        }),
-        db.agentRun.update({ where: { id: runId }, data: { status, error: cancelled ? null : error } }),
-      ]);
+      await db
+        .$transaction([
+          ...(assistantId
+            ? [
+                db.message.update({
+                  where: { id: assistantId },
+                  data: { content: { text, tools: toolEvents } as Prisma.InputJsonValue, status },
+                }),
+              ]
+            : []),
+          db.agentRun.update({ where: { id: runId }, data: { status, error: cancelled ? null : error } }),
+        ])
+        .catch((e) => logger.error("failed to record run failure", { error: String(e) }));
       throw err;
     }
   },
