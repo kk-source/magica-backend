@@ -7,6 +7,10 @@ const schema = z.object({
   OPENROUTER_MODEL: z.string().default("openrouter/auto"),
   MAGICA_API_KEY: z.string().min(1),
   MAGICA_API_BASE_URL: z.string().url().default("https://inference.magica.com/v1"),
+  // Optional so the rest of the API runs without uploads configured.
+  TRANSLOADIT_KEY: z.string().min(1).optional(),
+  TRANSLOADIT_SECRET: z.string().min(1).optional(),
+  TRANSLOADIT_TEMPLATE_ID: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof schema>;
