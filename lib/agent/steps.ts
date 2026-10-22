@@ -28,10 +28,8 @@ function keyArg(name: string, input: unknown): string | null {
       return typeof i.name === "string" ? i.name : null;
     case "read_skill_asset":
       return typeof i.path === "string" ? i.path : null;
-    case "crop_image": {
-      const c = i.crop as { width?: number; height?: number } | undefined;
-      return c?.width && c?.height ? `${c.width}×${c.height}` : null;
-    }
+    case "crop_image":
+      return typeof i.aspect_ratio === "string" ? i.aspect_ratio : i.region ? "custom area" : null;
     case "gpt_image_2":
       return typeof i.prompt === "string" ? truncate(i.prompt) : null;
     case "merge_videos":

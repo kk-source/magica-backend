@@ -19,6 +19,7 @@
     "@prisma/client": "^7.10.1",
     "@trigger.dev/sdk": "^4.7.6",
     "gray-matter": "^4.0.3",
+    "image-size": "2.0.2",
     "next": "^15.5.28",
     "openai": "^7.42.0",
     "react": "^19.3.1",
