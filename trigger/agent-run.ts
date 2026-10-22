@@ -3,7 +3,7 @@ import type OpenAI from "openai";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { runAgent } from "@/lib/agent/loop";
 import { readContent, type ToolEvent } from "@/lib/contracts";
-import { suggestionsFor } from "@/lib/agent/steps";
+import { suggestionsFor, totalCredits } from "@/lib/agent/steps";
 import { db } from "@/lib/db";
 
 type Payload = { chatId: string; runId: string; userMessageId: string };
@@ -46,6 +46,7 @@ export const agentRun = task({
     });
     await db.agentRun.update({ where: { id: runId }, data: { status: "STREAMING", assistantMessageId: assistant.id } });
     metadata.set("assistantMessageId", assistant.id);
+    metadata.set("status", "STREAMING");
 
     let text = "";
     const toolEvents: ToolEvent[] = [];
@@ -65,6 +66,8 @@ export const agentRun = task({
       }
       flush(true);
 
+      const chat = await db.chat.findUniqueOrThrow({ where: { id: chatId }, select: { userId: true } });
+      const cost = totalCredits(toolEvents);
       await db.$transaction([
         db.message.update({
           where: { id: assistant.id },
@@ -74,13 +77,24 @@ export const agentRun = task({
           },
         }),
         db.agentRun.update({ where: { id: runId }, data: { status: "COMPLETE" } }),
+        // Settle credits for the Magica tool calls this run made.
+        ...(cost > 0
+          ? [
+              db.user.update({ where: { id: chat.userId }, data: { credits: { decrement: cost } } }),
+              db.creditLedger.create({
+                data: { userId: chat.userId, runId, amount: -cost, type: "DEBIT", description: "Agent run" },
+              }),
+            ]
+          : []),
       ]);
+      metadata.set("status", "COMPLETE");
       return { assistantMessageId: assistant.id };
     } catch (err) {
       const cancelled = signal.aborted;
       const error = err instanceof Error ? err.message : String(err);
       logger.error("agent run failed", { error, cancelled });
       const status = cancelled ? "CANCELLED" : "FAILED";
+      metadata.set("status", status);
       await db.$transaction([
         db.message.update({
           where: { id: assistant.id },
