@@ -58,7 +58,7 @@ enum LedgerType {
 model User {
   id        String         @id @default(cuid())
   clerkId   String         @unique
-  credits   Int            @default(1000)
+  credits   Int            @default(100000)
   createdAt DateTime       @default(now())
   chats     Chat[]
   ledger    CreditLedger[]

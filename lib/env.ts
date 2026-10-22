@@ -4,7 +4,7 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   FRONTEND_ORIGIN: z.string().default("http://localhost:3000"),
   OPENROUTER_API_KEY: z.string().min(1),
-  OPENROUTER_MODEL: z.string().default("openrouter/auto"),
+  OPENROUTER_MODEL: z.string().default("openrouter/free"),
   MAGICA_API_KEY: z.string().min(1),
   MAGICA_API_BASE_URL: z.string().url().default("https://inference.magica.com/v1"),
 });
