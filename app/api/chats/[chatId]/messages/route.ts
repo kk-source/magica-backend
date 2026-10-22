@@ -1,13 +1,17 @@
-import { auth as triggerAuth, tasks } from "@trigger.dev/sdk";
+import { randomUUID } from "node:crypto";
+import { tasks } from "@trigger.dev/sdk";
 import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
-import { MessagesQuery, SendMessageBody, type MessageDto } from "@/lib/contracts";
+import { MessagesQuery, SendMessageBody, messageInclude, toMessage } from "@/lib/contracts";
 import { handler, json, parseBody, parseQuery } from "@/lib/http";
 import type { agentRun } from "@/trigger/agent-run";
 
 type Ctx = { params: Promise<{ chatId: string }> };
 
-/** Newest-first cursor pagination; the client reverses for display. */
+/**
+ * Cursor-paginated history. Returns a page (oldest first) ending just before `cursor`;
+ * the cursor for the next older page is in the `X-Next-Cursor` header.
+ */
 export const GET = handler<Ctx>(async (req, { params }) => {
   const { chatId } = await params;
   const user = await requireUser();
@@ -19,52 +23,74 @@ export const GET = handler<Ctx>(async (req, { params }) => {
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    include: { attachments: true },
+    include: messageInclude,
   });
   const page = rows.slice(0, limit);
-  const messages: MessageDto[] = page.map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
-    status: m.status,
-    createdAt: m.createdAt.toISOString(),
-  }));
-  return json({ messages, nextCursor: rows.length > limit ? page.at(-1)?.id ?? null : null });
+  const res = json(page.reverse().map(toMessage));
+  if (rows.length > limit && page[0]) res.headers.set("X-Next-Cursor", page[0].id);
+  return res;
 });
 
-/** Persists the user turn and dispatches the agent run. Idempotent on `idempotencyKey`. */
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif",
+  mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+};
+
+function normalizeAttachment(a: string | { url: string; assemblyId?: string; mimeType?: string; fileName?: string; fileSizeBytes?: number }) {
+  const att = typeof a === "string" ? { url: a } : a;
+  const fileName = att.fileName ?? decodeURIComponent(new URL(att.url).pathname.split("/").pop() || "file");
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return {
+    fileUrl: att.url,
+    assemblyId: att.assemblyId,
+    fileName,
+    mimeType: att.mimeType ?? MIME_BY_EXT[ext] ?? "application/octet-stream",
+    fileSizeBytes: att.fileSizeBytes ?? 0,
+  };
+}
+
+/** Persists the user turn and dispatches the agent run. Idempotent on the idempotency key. */
 export const POST = handler<Ctx>(async (req, { params }) => {
   const { chatId } = await params;
   const user = await requireUser();
-  await requireChat(user.id, chatId);
+  const chat = await requireChat(user.id, chatId);
   const body = await parseBody(req, SendMessageBody);
+  const idempotencyKey = body.idempotencyKey ?? req.headers.get("idempotency-key") ?? randomUUID();
 
-  const existing = await db.agentRun.findUnique({ where: { idempotencyKey: body.idempotencyKey } });
-  if (existing) return json({ runId: existing.id, messageId: existing.messageId, triggerRunId: existing.triggerRunId });
+  const existing = await db.agentRun.findUnique({
+    where: { idempotencyKey },
+    include: { message: { include: messageInclude } },
+  });
+  if (existing) return json({ message: toMessage(existing.message), runId: existing.id });
 
   const { message, run } = await db.$transaction(async (tx) => {
     const message = await tx.message.create({
       data: {
         chatId,
         role: "USER",
-        content: { text: body.text },
-        attachments: { create: body.attachments },
+        content: { text: body.content },
+        attachments: { create: body.attachments.map(normalizeAttachment) },
       },
+      include: messageInclude,
     });
-    const run = await tx.agentRun.create({
-      data: { chatId, messageId: message.id, idempotencyKey: body.idempotencyKey },
-    });
-    await tx.chat.update({ where: { id: chatId }, data: { updatedAt: new Date() } });
+    const run = await tx.agentRun.create({ data: { chatId, messageId: message.id, idempotencyKey } });
+    // First message names the chat.
+    const title = chat.title === "New chat" ? body.content.slice(0, 60) : undefined;
+    await tx.chat.update({ where: { id: chatId }, data: { updatedAt: new Date(), ...(title ? { title } : {}) } });
     return { message, run };
   });
 
-  const handle = await tasks.trigger<typeof agentRun>(
-    "agent-run",
-    { chatId, runId: run.id, userMessageId: message.id },
-    { idempotencyKey: body.idempotencyKey, tags: [`chat_${chatId}`, `user_${user.id}`] },
-  );
-  await db.agentRun.update({ where: { id: run.id }, data: { triggerRunId: handle.id } });
+  try {
+    const handle = await tasks.trigger<typeof agentRun>(
+      "agent-run",
+      { chatId, runId: run.id, userMessageId: message.id },
+      { idempotencyKey, tags: [`chat_${chatId}`, `user_${user.id}`] },
+    );
+    await db.agentRun.update({ where: { id: run.id }, data: { triggerRunId: handle.id } });
+  } catch (err) {
+    await db.agentRun.update({ where: { id: run.id }, data: { status: "FAILED", error: "Failed to start agent run" } });
+    throw err;
+  }
 
-  const publicAccessToken = await triggerAuth.createPublicToken({ scopes: { read: { runs: [handle.id] } } });
-  return json({ runId: run.id, messageId: message.id, triggerRunId: handle.id, publicAccessToken }, 202);
+  return json({ message: toMessage(message), runId: run.id }, 202);
 });

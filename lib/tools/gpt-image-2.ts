@@ -1,6 +1,9 @@
 import { z } from "zod";
-import { runMagica } from "./magica";
+import { firstOutputUrl, runMagica, toAppCredits } from "./magica";
 import { defineTool } from "./types";
+
+// Sub-model ids per Magica's model list (GET /v1/models → gpt_image_2.subModels).
+const SUB_MODEL = { text: "gpt-image-2-text", edit: "gpt-image-2-edit" } as const;
 
 export const gptImage2 = defineTool({
   name: "gpt_image_2",
@@ -14,8 +17,13 @@ export const gptImage2 = defineTool({
     })
     .refine((v) => v.mode === "text" || v.image_url, { message: "image_url is required when mode is 'edit'" }),
   output: z.object({ image_url: z.string().url() }),
-  async execute(input, ctx) {
-    const run = await runMagica("gpt-image-2", input, ctx.signal);
-    return { output: { image_url: String(run.output?.image_url) }, magicaRunId: run.id, creditCost: run.cost ?? 5 };
+  async execute({ prompt, image_url, mode }, ctx) {
+    const input = mode === "edit" && image_url ? { prompt, image_urls: [image_url] } : { prompt };
+    const run = await runMagica("gpt_image_2", input, { subModelId: SUB_MODEL[mode], signal: ctx.signal });
+    return {
+      output: { image_url: firstOutputUrl(run.output, ["images", "image_url"]) },
+      magicaRunId: run.id,
+      creditCost: toAppCredits(run.creditUsed),
+    };
   },
 });

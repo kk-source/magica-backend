@@ -23,10 +23,9 @@ enum MessageStatus {
 }
 
 enum RunStatus {
-  QUEUED
-  RUNNING
-  WAITING
-  COMPLETED
+  PENDING
+  STREAMING
+  COMPLETE
   FAILED
   CANCELLED
 }
@@ -88,26 +87,30 @@ model Message {
   createdAt   DateTime      @default(now())
   chat        Chat          @relation(fields: [chatId], references: [id], onDelete: Cascade)
   attachments Attachment[]
-  runs        AgentRun[]
+  runs        AgentRun[]    @relation("UserMessage")
+  reply       AgentRun?     @relation("AssistantMessage")
 
   @@index([chatId, createdAt])
 }
 
 model AgentRun {
-  id             String           @id @default(cuid())
-  chatId         String
-  messageId      String
-  triggerRunId   String?
-  status         RunStatus        @default(QUEUED)
-  idempotencyKey String           @unique
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  chat           Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  message        Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  tools          ToolInvocation[]
-  skills         RunSkill[]
-  waitpoints     Waitpoint[]
-  ledger         CreditLedger[]
+  id                 String           @id @default(cuid())
+  chatId             String
+  messageId          String
+  assistantMessageId String?          @unique
+  triggerRunId       String?
+  status             RunStatus        @default(PENDING)
+  error              String?
+  idempotencyKey     String           @unique
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  chat               Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message            Message          @relation("UserMessage", fields: [messageId], references: [id], onDelete: Cascade)
+  assistantMessage   Message?         @relation("AssistantMessage", fields: [assistantMessageId], references: [id], onDelete: SetNull)
+  tools              ToolInvocation[]
+  skills             RunSkill[]
+  waitpoints         Waitpoint[]
+  ledger             CreditLedger[]
 
   @@index([chatId, createdAt])
 }
