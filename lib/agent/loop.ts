@@ -9,8 +9,8 @@ type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 export type AgentEvent =
   | { type: "text"; delta: string }
-  | { type: "tool_start"; id: string; name: string; input: unknown }
-  | { type: "tool_end"; id: string; name: string; output?: unknown; error?: string }
+  | { type: "tool_start"; id: string; name: string; input: unknown; at: number }
+  | { type: "tool_end"; id: string; name: string; output?: unknown; error?: string; at: number; creditCost?: number }
   | { type: "done"; text: string };
 
 const MAX_STEPS = 10;
@@ -97,7 +97,7 @@ async function* executeTool(
   } catch {
     rawInput = call.args;
   }
-  yield { type: "tool_start", id: call.id, name: call.name, input: rawInput };
+  yield { type: "tool_start", id: call.id, name: call.name, input: rawInput, at: Date.now() };
 
   const tool = toolsByName.get(call.name);
   const invocation = await db.toolInvocation.create({
@@ -128,7 +128,7 @@ async function* executeTool(
         durationMs: Date.now() - started,
       },
     });
-    yield { type: "tool_end", id: call.id, name: call.name, output };
+    yield { type: "tool_end", id: call.id, name: call.name, output, creditCost, at: Date.now() };
     return output;
   } catch (err) {
     // Errors go back to the model as tool results so it can recover or explain.
@@ -137,7 +137,7 @@ async function* executeTool(
       where: { id: invocation.id },
       data: { status: "FAILED", output: { error }, durationMs: Date.now() - started },
     });
-    yield { type: "tool_end", id: call.id, name: call.name, error };
+    yield { type: "tool_end", id: call.id, name: call.name, error, at: Date.now() };
     return { error };
   }
 }
