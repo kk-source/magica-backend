@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
 import { readContent, type Run, type ToolEvent } from "@/lib/contracts";
 import { HttpError, handler, json } from "@/lib/http";
+import { toToolSteps, totalCredits } from "@/lib/agent/steps";
 
 type Ctx = { params: Promise<{ chatId: string; runId: string }> };
 
@@ -25,6 +26,15 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
     if (Array.isArray(meta?.tools)) tools = meta.tools;
   }
 
-  const dto: Run = { id: run.id, chatId, status: run.status, text, tools, error: run.error };
+  const dto: Run = {
+    id: run.id,
+    chatId,
+    status: run.status,
+    text,
+    tools,
+    toolSteps: toToolSteps(tools),
+    credits: totalCredits(tools),
+    error: run.error,
+  };
   return json(dto);
 });

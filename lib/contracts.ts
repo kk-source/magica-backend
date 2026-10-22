@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { toToolSteps, totalCredits } from "@/lib/agent/steps";
 
 // HTTP contract. Mirrors magica-frontend lib/api/schemas.ts — keep the two in sync.
 
@@ -22,8 +23,18 @@ export const ToolEventSchema = z.object({
   input: z.unknown().optional(),
   output: z.unknown().optional(),
   error: z.string().optional(),
+  at: z.number().optional(),
+  creditCost: z.number().optional(),
 });
 export type ToolEvent = z.infer<typeof ToolEventSchema>;
+
+export const ToolStepSchema = z.object({
+  label: z.string(),
+  boldArg: z.string().nullish(),
+  elapsedMs: z.number(),
+  status: z.enum(["running", "done", "failed"]),
+});
+export type ToolStep = z.infer<typeof ToolStepSchema>;
 
 export const MessageSchema = z.object({
   id: z.string(),
@@ -34,6 +45,9 @@ export const MessageSchema = z.object({
   runId: z.string().nullish(),
   attachments: z.array(z.object({ url: z.string(), mimeType: z.string(), fileName: z.string() })),
   tools: z.array(ToolEventSchema),
+  toolSteps: z.array(ToolStepSchema).optional(),
+  credits: z.number().optional(),
+  suggestions: z.array(z.string()).optional(),
   createdAt: z.string(),
 });
 export type Message = z.infer<typeof MessageSchema>;
@@ -44,6 +58,8 @@ export const RunSchema = z.object({
   status: RunStatusSchema,
   text: z.string(),
   tools: z.array(ToolEventSchema),
+  toolSteps: z.array(ToolStepSchema),
+  credits: z.number(),
   error: z.string().nullish(),
 });
 export type Run = z.infer<typeof RunSchema>;
@@ -78,11 +94,15 @@ export const MessagesQuery = z.object({
 // ---- Mappers ----
 
 /** Stored message content shape (Message.content JSON column). */
-export type StoredContent = { text: string; tools?: ToolEvent[] };
+export type StoredContent = { text: string; tools?: ToolEvent[]; suggestions?: string[] };
 
 export const readContent = (json: Prisma.JsonValue): StoredContent => {
   const c = (json ?? {}) as Partial<StoredContent>;
-  return { text: typeof c.text === "string" ? c.text : "", tools: Array.isArray(c.tools) ? c.tools : [] };
+  return {
+    text: typeof c.text === "string" ? c.text : "",
+    tools: Array.isArray(c.tools) ? c.tools : [],
+    suggestions: Array.isArray(c.suggestions) ? c.suggestions : [],
+  };
 };
 
 export const toChat = (c: { id: string; title: string; pinned: boolean; createdAt: Date; updatedAt: Date }): Chat => ({
@@ -108,6 +128,13 @@ export const toMessage = (m: MessageRow): Message => {
     runId: m.reply?.id ?? null,
     attachments: m.attachments.map((a) => ({ url: a.fileUrl, mimeType: a.mimeType, fileName: a.fileName })),
     tools: content.tools ?? [],
+    ...(m.role === "ASSISTANT"
+      ? {
+          toolSteps: toToolSteps(content.tools ?? []),
+          credits: totalCredits(content.tools ?? []),
+          suggestions: content.suggestions ?? [],
+        }
+      : {}),
     createdAt: m.createdAt.toISOString(),
   };
 };

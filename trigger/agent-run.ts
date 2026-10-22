@@ -3,6 +3,7 @@ import type OpenAI from "openai";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { runAgent } from "@/lib/agent/loop";
 import { readContent, type ToolEvent } from "@/lib/contracts";
+import { suggestionsFor } from "@/lib/agent/steps";
 import { db } from "@/lib/db";
 
 type Payload = { chatId: string; runId: string; userMessageId: string };
@@ -67,7 +68,10 @@ export const agentRun = task({
       await db.$transaction([
         db.message.update({
           where: { id: assistant.id },
-          data: { content: { text, tools: toolEvents } as Prisma.InputJsonValue, status: "COMPLETE" },
+          data: {
+            content: { text, tools: toolEvents, suggestions: suggestionsFor(toolEvents) } as Prisma.InputJsonValue,
+            status: "COMPLETE",
+          },
         }),
         db.agentRun.update({ where: { id: runId }, data: { status: "COMPLETE" } }),
       ]);
