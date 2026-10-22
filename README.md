@@ -34,7 +34,7 @@ The contract lives in `lib/contracts.ts` and mirrors the frontend's `lib/api/sch
 
 ## Magica
 
-Tools call `POST /v1/nodes/{nodeType}/run` and poll `GET /v1/nodes/runs/{runId}` (`lib/tools/magica.ts`). Node types: `crop_image`, `gpt_image_2` (sub-models `gpt-image-2-text` / `gpt-image-2-edit`), `merge_videos`.
+Tools call `POST /v1/nodes/{nodeType}/run` and poll `GET /v1/nodes/runs/{runId}` (`lib/tools/magica.ts`). Node types: `crop_image`, `gpt_image_2` (sub-model `gpt-image-2-edit` when `input_images` is set, else `gpt-image-2-text`), `merge_videos`.
 
 ## Skills
 
