@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "trigger:dev": "npx trigger.dev@latest dev"
+    "trigger:dev": "npx trigger.dev@latest dev",
+    "postinstall": "prisma generate",
+    "trigger:deploy": "prisma generate && npx trigger.dev@latest deploy"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.19",
