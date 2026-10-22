@@ -35,6 +35,8 @@ export const gptImage2 = defineTool({
       {
         prompt: input.prompt,
         size: SIZE_FOR_RATIO[input.aspect_ratio ?? "auto"],
+        // Medium is roughly twice as fast as Magica's High default with little visible loss.
+        quality: "Medium",
         ...(mode === "edit" ? { uploadedImages: input.input_images } : {}),
       },
       { subModelId: SUB_MODEL[mode], signal: ctx.signal },
