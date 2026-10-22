@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum MessageStatus {
+  PENDING
+  STREAMING
+  COMPLETE
+  FAILED
+  CANCELLED
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  WAITING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AttachmentStatus {
+  UPLOADING
+  READY
+  FAILED
+}
+
+enum ToolStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum WaitpointStatus {
+  PENDING
+  RESOLVED
+  EXPIRED
+}
+
+enum LedgerType {
+  GRANT
+  DEBIT
+  REFUND
+}
+
+model User {
+  id        String         @id @default(cuid())
+  clerkId   String         @unique
+  credits   Int            @default(1000)
+  createdAt DateTime       @default(now())
+  chats     Chat[]
+  ledger    CreditLedger[]
+}
+
+model Chat {
+  id        String     @id @default(cuid())
+  userId    String
+  title     String     @default("New chat")
+  pinned    Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  runs      AgentRun[]
+
+  @@index([userId, createdAt])
+}
+
+model Message {
+  id          String        @id @default(cuid())
+  chatId      String
+  role        MessageRole
+  content     Json
+  status      MessageStatus @default(COMPLETE)
+  createdAt   DateTime      @default(now())
+  chat        Chat          @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+  runs        AgentRun[]
+
+  @@index([chatId, createdAt])
+}
+
+model AgentRun {
+  id             String           @id @default(cuid())
+  chatId         String
+  messageId      String
+  triggerRunId   String?
+  status         RunStatus        @default(QUEUED)
+  idempotencyKey String           @unique
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  chat           Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message        Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  tools          ToolInvocation[]
+  skills         RunSkill[]
+  waitpoints     Waitpoint[]
+  ledger         CreditLedger[]
+
+  @@index([chatId, createdAt])
+}
+
+model Attachment {
+  id            String           @id @default(cuid())
+  messageId     String
+  assemblyId    String?
+  fileUrl       String
+  mimeType      String
+  fileName      String
+  fileSizeBytes Int
+  status        AttachmentStatus @default(READY)
+  createdAt     DateTime         @default(now())
+  message       Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model ToolInvocation {
+  id          String     @id @default(cuid())
+  runId       String
+  toolName    String
+  input       Json
+  output      Json?
+  status      ToolStatus @default(PENDING)
+  magicaRunId String?
+  durationMs  Int?
+  creditCost  Int        @default(0)
+  createdAt   DateTime   @default(now())
+  run         AgentRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+}
+
+model RunSkill {
+  id          String   @id @default(cuid())
+  runId       String
+  skillName   String
+  contentHash String
+  loadedAt    DateTime @default(now())
+  run         AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, skillName])
+}
+
+model Waitpoint {
+  id         String          @id @default(cuid())
+  runId      String
+  token      String          @unique
+  type       String
+  status     WaitpointStatus @default(PENDING)
+  expiresAt  DateTime?
+  resolvedAt DateTime?
+  run        AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+model CreditLedger {
+  id          String     @id @default(cuid())
+  userId      String
+  amount      Int
+  type        LedgerType
+  description String
+  runId       String?
+  createdAt   DateTime   @default(now())
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run         AgentRun?  @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
