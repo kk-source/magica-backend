@@ -5,6 +5,18 @@ import { defineTool } from "./types";
 // Magica node gpt_image_2: sub-model picked by whether source images are supplied.
 const SUB_MODEL = { text: "gpt-image-2-text", edit: "gpt-image-2-edit" } as const;
 
+// Magica takes a fixed `size`, not a ratio; map each ratio to the closest supported size.
+const SIZE_FOR_RATIO = {
+  auto: "Auto",
+  "1:1": "1024x1024",
+  "3:2": "1536x1024",
+  "4:3": "1536x1024",
+  "16:9": "2048x1152",
+  "2:3": "1024x1536",
+  "3:4": "1024x1536",
+  "9:16": "1024x1536",
+} as const;
+
 export const gptImage2 = defineTool({
   name: "gpt_image_2",
   description:
@@ -19,11 +31,11 @@ export const gptImage2 = defineTool({
     const mode = input.input_images?.length ? "edit" : "text";
     const run = await runMagica(
       "gpt_image_2",
-      // Only send fields the model is known to accept; Magica rejects unknown input keys.
+      // Field names from Magica's live schema (GET /v1/models/gpt-image-2-{text,edit}/schema).
       {
         prompt: input.prompt,
-        ...(input.aspect_ratio ? { aspect_ratio: input.aspect_ratio } : {}),
-        ...(mode === "edit" ? { input_images: input.input_images } : {}),
+        size: SIZE_FOR_RATIO[input.aspect_ratio ?? "auto"],
+        ...(mode === "edit" ? { uploadedImages: input.input_images } : {}),
       },
       { subModelId: SUB_MODEL[mode], signal: ctx.signal },
     );
