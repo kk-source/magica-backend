@@ -3,7 +3,7 @@ import { tasks } from "@trigger.dev/sdk";
 import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
 import { MessagesQuery, SendMessageBody, messageInclude, toMessage } from "@/lib/contracts";
-import { handler, json, parseBody, parseQuery } from "@/lib/http";
+import { HttpError, handler, json, parseBody, parseQuery } from "@/lib/http";
 import type { agentRun } from "@/trigger/agent-run";
 
 type Ctx = { params: Promise<{ chatId: string }> };
@@ -55,6 +55,7 @@ export const POST = handler<Ctx>(async (req, { params }) => {
   const user = await requireUser();
   const chat = await requireChat(user.id, chatId);
   const body = await parseBody(req, SendMessageBody);
+  if (user.credits <= 0) throw new HttpError(402, "Out of credits");
   const idempotencyKey = body.idempotencyKey ?? req.headers.get("idempotency-key") ?? randomUUID();
 
   const existing = await db.agentRun.findUnique({

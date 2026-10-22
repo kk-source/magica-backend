@@ -36,7 +36,11 @@ export async function* runAgent(opts: {
   signal?: AbortSignal;
 }): AsyncGenerator<AgentEvent> {
   const { OPENROUTER_API_KEY, OPENROUTER_MODEL } = env();
-  const client = new OpenAI({ apiKey: OPENROUTER_API_KEY, baseURL: "https://openrouter.ai/api/v1" });
+  const client = new OpenAI({
+    apiKey: OPENROUTER_API_KEY,
+    baseURL: "https://openrouter.ai/api/v1",
+    defaultHeaders: { "HTTP-Referer": "https://magica.app", "X-Title": "Magica Agent Chat" },
+  });
   const messages: ChatMessage[] = [{ role: "system", content: await buildSystemPrompt() }, ...opts.messages];
   let finalText = "";
 
