@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { runMagica } from "./magica";
+import { firstOutputUrl, runMagica, toAppCredits } from "./magica";
 import { defineTool } from "./types";
 
 export const mergeVideos = defineTool({
@@ -11,7 +11,11 @@ export const mergeVideos = defineTool({
   }),
   output: z.object({ video_url: z.string().url() }),
   async execute(input, ctx) {
-    const run = await runMagica("merge-videos", input, ctx.signal);
-    return { output: { video_url: String(run.output?.video_url) }, magicaRunId: run.id, creditCost: run.cost ?? 3 };
+    const run = await runMagica("merge_videos", input, { signal: ctx.signal });
+    return {
+      output: { video_url: firstOutputUrl(run.output, ["video_url", "videos"]) },
+      magicaRunId: run.id,
+      creditCost: toAppCredits(run.creditUsed),
+    };
   },
 });

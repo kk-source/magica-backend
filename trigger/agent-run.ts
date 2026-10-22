@@ -1,7 +1,8 @@
 import { logger, metadata, task } from "@trigger.dev/sdk";
 import type OpenAI from "openai";
 import type { Prisma } from "@/lib/generated/prisma/client";
-import { runAgent, type AgentEvent } from "@/lib/agent/loop";
+import { runAgent } from "@/lib/agent/loop";
+import { readContent, type ToolEvent } from "@/lib/contracts";
 import { db } from "@/lib/db";
 
 type Payload = { chatId: string; runId: string; userMessageId: string };
@@ -15,19 +16,24 @@ function toChatMessages(
   return rows
     .filter((m) => m.role === "USER" || m.role === "ASSISTANT")
     .map((m) => {
-      const text = (m.content as { text?: string } | null)?.text ?? "";
-      const files = m.attachments.map((a) => `[attachment ${a.mimeType}] ${a.fileUrl}`).join("\n");
-      return m.role === "USER"
-        ? { role: "user" as const, content: files ? `${text}\n\n${files}` : text }
-        : { role: "assistant" as const, content: text };
-    });
+      const { text, tools = [] } = readContent(m.content);
+      if (m.role === "USER") {
+        const files = m.attachments.map((a) => `[attachment ${a.mimeType}] ${a.fileUrl}`).join("\n");
+        return { role: "user" as const, content: files ? `${text}\n\n${files}` : text };
+      }
+      // Keep earlier tool outputs (URLs) visible so follow-ups like "now crop that" can chain.
+      const results = tools
+        .filter((t) => t.type === "tool_end" && t.output)
+        .map((t) => `[${t.name} result] ${JSON.stringify(t.output)}`)
+        .join("\n");
+      return { role: "assistant" as const, content: results ? `${results}\n\n${text}` : text };
+    })
+    .filter((m) => m.content);
 }
 
 export const agentRun = task({
   id: "agent-run",
   run: async ({ chatId, runId }: Payload, { signal }) => {
-    await db.agentRun.update({ where: { id: runId }, data: { status: "RUNNING" } });
-
     const history = await db.message.findMany({
       where: { chatId },
       orderBy: { createdAt: "desc" },
@@ -37,10 +43,11 @@ export const agentRun = task({
     const assistant = await db.message.create({
       data: { chatId, role: "ASSISTANT", content: { text: "" }, status: "STREAMING" },
     });
+    await db.agentRun.update({ where: { id: runId }, data: { status: "STREAMING", assistantMessageId: assistant.id } });
     metadata.set("assistantMessageId", assistant.id);
 
     let text = "";
-    const toolEvents: Exclude<AgentEvent, { type: "text" | "done" }>[] = [];
+    const toolEvents: ToolEvent[] = [];
     let lastFlush = 0;
     const flush = (force = false) => {
       if (!force && Date.now() - lastFlush < FLUSH_MS) return;
@@ -62,21 +69,20 @@ export const agentRun = task({
           where: { id: assistant.id },
           data: { content: { text, tools: toolEvents } as Prisma.InputJsonValue, status: "COMPLETE" },
         }),
-        db.agentRun.update({ where: { id: runId }, data: { status: "COMPLETED" } }),
+        db.agentRun.update({ where: { id: runId }, data: { status: "COMPLETE" } }),
       ]);
       return { assistantMessageId: assistant.id };
     } catch (err) {
       const cancelled = signal.aborted;
-      logger.error("agent run failed", { err: String(err), cancelled });
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error("agent run failed", { error, cancelled });
+      const status = cancelled ? "CANCELLED" : "FAILED";
       await db.$transaction([
         db.message.update({
           where: { id: assistant.id },
-          data: {
-            content: { text, tools: toolEvents } as Prisma.InputJsonValue,
-            status: cancelled ? "CANCELLED" : "FAILED",
-          },
+          data: { content: { text, tools: toolEvents } as Prisma.InputJsonValue, status },
         }),
-        db.agentRun.update({ where: { id: runId }, data: { status: cancelled ? "CANCELLED" : "FAILED" } }),
+        db.agentRun.update({ where: { id: runId }, data: { status, error: cancelled ? null : error } }),
       ]);
       throw err;
     }

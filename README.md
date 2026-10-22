@@ -26,9 +26,15 @@ pnpm trigger:dev            # in a second terminal: runs Trigger.dev tasks local
 
 ## Flow
 
-1. `POST /api/chats/:id/messages` with `{ text, attachments, idempotencyKey }` stores the user message, creates an `AgentRun`, triggers `agent-run`, and returns `{ runId, triggerRunId, publicAccessToken }`.
-2. The frontend subscribes with Trigger.dev Realtime (`useRealtimeRun(triggerRunId, { accessToken })`) and reads `metadata.text` / `metadata.tools` as they stream.
+1. `POST /api/chats/:id/messages` with `{ content, attachments?, idempotencyKey? }` stores the user message, creates an `AgentRun`, triggers `agent-run`, and returns `{ message, runId }`.
+2. The frontend polls `GET /api/chats/:id/runs/:runId` → `{ id, chatId, status, text, tools, error }`. While `STREAMING`, text comes live from the Trigger.dev run metadata.
 3. On completion the assistant message is saved with status `COMPLETE` (or `FAILED` / `CANCELLED`).
+
+The contract lives in `lib/contracts.ts` and mirrors the frontend's `lib/api/schemas.ts`.
+
+## Magica
+
+Tools call `POST /v1/nodes/{nodeType}/run` and poll `GET /v1/nodes/runs/{runId}` (`lib/tools/magica.ts`). Node types: `crop_image`, `gpt_image_2` (sub-models `gpt-image-2-text` / `gpt-image-2-edit`), `merge_videos`.
 
 ## Skills
 
