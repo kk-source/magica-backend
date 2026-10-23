@@ -6,6 +6,7 @@ import { defineTool } from "./types";
 const RATIOS = ["1:1", "4:5", "3:4", "2:3", "9:16", "5:4", "4:3", "3:2", "16:9"] as const;
 
 const pct = z.number().min(0).max(100);
+const px = z.number().int().min(0);
 
 /** Reads width/height from the image header so crops can be exact without the model knowing the size. */
 async function dimensions(url: string, signal?: AbortSignal) {
@@ -22,16 +23,31 @@ export const cropImage = defineTool({
     "Crop an image. `region` is a rectangle in percent of the image (0–100, from the top-left); omit it to use the whole image. " +
     "`aspect_ratio` takes the largest rectangle of that ratio centered inside the region. " +
     'Examples: square → {aspect_ratio:"1:1"}; left half → {region:{x:0,y:0,width:50,height:100}}; ' +
-    'square around a subject in the upper middle → {region:{x:20,y:0,width:60,height:70}, aspect_ratio:"1:1"}.',
+    'square around a subject in the upper middle → {region:{x:20,y:0,width:60,height:70}, aspect_ratio:"1:1"}. ' +
+    "Use `crop` instead of `region` only when exact pixel coordinates are known.",
   input: z.object({
     image_url: z.string().url(),
     region: z.object({ x: pct, y: pct, width: pct.positive(), height: pct.positive() }).optional(),
+    /** Exact rectangle in pixels, from the top-left. */
+    crop: z
+      .object({ x: px, y: px, width: px.positive(), height: px.positive() })
+      .optional(),
     aspect_ratio: z.enum(RATIOS).optional(),
-  }),
+  }).refine((i) => !(i.region && i.crop), "Pass either region (percent) or crop (pixels), not both"),
   output: z.object({ image_url: z.string().url(), width: z.number(), height: z.number() }),
-  async execute({ image_url, region, aspect_ratio }, ctx) {
+  async execute({ image_url, region, crop: pixels, aspect_ratio }, ctx) {
     const img = await dimensions(image_url, ctx.signal);
-    const r = region ?? { x: 0, y: 0, width: 100, height: 100 };
+    if (pixels && (pixels.x + pixels.width > img.width || pixels.y + pixels.height > img.height)) {
+      throw new Error(`Crop rectangle falls outside the ${img.width}×${img.height} image`);
+    }
+    const r = pixels
+      ? {
+          x: (pixels.x / img.width) * 100,
+          y: (pixels.y / img.height) * 100,
+          width: (pixels.width / img.width) * 100,
+          height: (pixels.height / img.height) * 100,
+        }
+      : (region ?? { x: 0, y: 0, width: 100, height: 100 });
     let x = (r.x / 100) * img.width;
     let y = (r.y / 100) * img.height;
     let w = Math.min((r.width / 100) * img.width, img.width - x);

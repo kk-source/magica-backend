@@ -29,7 +29,7 @@ function keyArg(name: string, input: unknown): string | null {
     case "read_skill_asset":
       return typeof i.path === "string" ? i.path : null;
     case "crop_image":
-      return typeof i.aspect_ratio === "string" ? i.aspect_ratio : i.region ? "custom area" : null;
+      return typeof i.aspect_ratio === "string" ? i.aspect_ratio : i.region || i.crop ? "custom area" : null;
     case "gpt_image_2":
       return typeof i.prompt === "string" ? truncate(i.prompt) : null;
     case "merge_videos":
