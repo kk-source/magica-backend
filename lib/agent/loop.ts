@@ -57,8 +57,10 @@ export async function* runAgent(opts: {
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
       if (delta.content) {
-        text += delta.content;
-        yield { type: "text", delta: delta.content };
+        // Separate text from a previous step (before tool calls) so sentences don't run together.
+        const sep = !text && /\S$/.test(finalText) && /^\S/.test(delta.content) ? "\n\n" : "";
+        text += sep + delta.content;
+        yield { type: "text", delta: sep + delta.content };
       }
       for (const tc of delta.tool_calls ?? []) {
         const cur = calls.get(tc.index) ?? { id: "", name: "", args: "" };
