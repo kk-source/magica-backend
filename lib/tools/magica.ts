@@ -32,8 +32,10 @@ async function request<T>(path: string, init: RequestInit = {}, attempt = 0): Pr
     ...init,
     headers: { Authorization: `Bearer ${MAGICA_API_KEY}`, "Content-Type": "application/json", ...init.headers },
   });
-  // Back off on rate limits and transient server errors.
-  if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
+  // Back off on rate limits, and on transient server errors for reads. A 5xx on POST /run may
+  // already have started a job, so retrying it could run and bill the work twice.
+  const retryable = res.status === 429 || (res.status >= 500 && (init.method ?? "GET") === "GET");
+  if (retryable && attempt < MAX_RETRIES) {
     const retryAfter = Number(res.headers.get("retry-after"));
     await sleep(retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt, init.signal ?? undefined);
     return request<T>(path, init, attempt + 1);
