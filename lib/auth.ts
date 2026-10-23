@@ -1,15 +1,17 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 
 /** Resolves the Clerk session to our User row, creating it on first request. */
 export async function requireUser() {
   const { userId } = await auth();
   if (!userId) throw new HttpError(401, "Unauthorized");
+  const credits = env().STARTING_CREDITS;
   return db.user.upsert({
     where: { clerkId: userId },
     update: {},
-    create: { clerkId: userId, ledger: { create: { amount: 1000, type: "GRANT", description: "Signup grant" } } },
+    create: { clerkId: userId, credits, ledger: { create: { amount: credits, type: "GRANT", description: "Signup grant" } } },
   });
 }
 

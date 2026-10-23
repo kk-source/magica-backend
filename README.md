@@ -118,7 +118,9 @@ Then start the frontend on http://localhost:3000 with `NEXT_PUBLIC_BACKEND_URL=h
 | `TRIGGER_SECRET_KEY` | yes | `tr_dev_…` locally, `tr_prod_…` on Vercel |
 | `TRIGGER_PROJECT_REF` | yes | `proj_…` from the Trigger.dev dashboard (`TRIGGER_PROJECT_ID` also accepted) |
 | `OPENROUTER_API_KEY` | yes | OpenRouter key |
-| `OPENROUTER_MODEL` | no | Defaults to `openrouter/auto`; set a free, tool-calling model to stay on the free tier |
+| `OPENROUTER_MODEL` | no | Defaults to `openrouter/free`. Only `openrouter/free` or a `:free` model is accepted; anything else fails env validation |
+| `STARTING_CREDITS` | no | Credits granted at signup (default 1000) |
+| `MIN_RUN_CREDITS` | no | Balance needed to start a turn (default 250) |
 | `MAGICA_API_KEY` | yes | Magica key (`gx_…`) |
 | `MAGICA_API_BASE_URL` | no | Defaults to `https://inference.magica.com/v1` |
 | `TRANSLOADIT_KEY` / `TRANSLOADIT_SECRET` | for uploads | Without them `/api/uploads/params` returns 503 and the rest still works |

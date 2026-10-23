@@ -32,6 +32,17 @@ function toChatMessages(
     .filter((m) => m.content);
 }
 
+/** Debits the Magica tool calls that completed in this run (once: the run reaches one terminal write). */
+async function settleCredits(chatId: string, runId: string, toolEvents: ToolEvent[]) {
+  const cost = totalCredits(toolEvents);
+  if (cost <= 0) return [];
+  const { userId } = await db.chat.findUniqueOrThrow({ where: { id: chatId }, select: { userId: true } });
+  return [
+    db.user.update({ where: { id: userId }, data: { credits: { decrement: cost } } }),
+    db.creditLedger.create({ data: { userId, runId, amount: -cost, type: "DEBIT", description: "Agent run" } }),
+  ];
+}
+
 export const agentRun = task({
   id: "agent-run",
   run: async ({ chatId, runId }: Payload, { signal }) => {
@@ -70,8 +81,6 @@ export const agentRun = task({
       }
       flush(true);
 
-      const chat = await db.chat.findUniqueOrThrow({ where: { id: chatId }, select: { userId: true } });
-      const cost = totalCredits(toolEvents);
       await db.$transaction([
         db.message.update({
           where: { id: assistant.id },
@@ -81,15 +90,7 @@ export const agentRun = task({
           },
         }),
         db.agentRun.update({ where: { id: runId }, data: { status: "COMPLETE" } }),
-        // Settle credits for the Magica tool calls this run made.
-        ...(cost > 0
-          ? [
-              db.user.update({ where: { id: chat.userId }, data: { credits: { decrement: cost } } }),
-              db.creditLedger.create({
-                data: { userId: chat.userId, runId, amount: -cost, type: "DEBIT", description: "Agent run" },
-              }),
-            ]
-          : []),
+        ...(await settleCredits(chatId, runId, toolEvents)),
       ]);
       metadata.set("status", "COMPLETE");
       return { assistantMessageId: assistant.id };
@@ -110,6 +111,8 @@ export const agentRun = task({
               ]
             : []),
           db.agentRun.update({ where: { id: runId }, data: { status, error: cancelled ? null : error } }),
+          // Magica work that finished before the failure was still billed to us.
+          ...(await settleCredits(chatId, runId, toolEvents).catch(() => [])),
         ])
         .catch((e) => logger.error("failed to record run failure", { error: String(e) }));
       throw err;

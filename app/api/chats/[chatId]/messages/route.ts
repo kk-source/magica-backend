@@ -3,10 +3,14 @@ import { tasks } from "@trigger.dev/sdk";
 import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
 import { MessagesQuery, SendMessageBody, messageInclude, toMessage } from "@/lib/contracts";
+import { env } from "@/lib/env";
 import { HttpError, handler, json, parseBody, parseQuery } from "@/lib/http";
 import type { agentRun } from "@/trigger/agent-run";
 
 type Ctx = { params: Promise<{ chatId: string }> };
+
+/** Trigger.dev maxDuration (15 min) plus slack. */
+const STALE_RUN_MS = 20 * 60_000;
 
 /**
  * Cursor-paginated history. Returns a page (oldest first) ending just before `cursor`;
@@ -55,7 +59,10 @@ export const POST = handler<Ctx>(async (req, { params }) => {
   const user = await requireUser();
   const chat = await requireChat(user.id, chatId);
   const body = await parseBody(req, SendMessageBody);
-  if (user.credits <= 0) throw new HttpError(402, "Out of credits");
+  const { MIN_RUN_CREDITS } = env();
+  if (user.credits < MIN_RUN_CREDITS) {
+    throw new HttpError(402, `Not enough credits to start a task (${user.credits} left, ${MIN_RUN_CREDITS} needed).`);
+  }
   const idempotencyKey = body.idempotencyKey ?? req.headers.get("idempotency-key") ?? randomUUID();
 
   const existing = await db.agentRun.findUnique({
@@ -65,6 +72,18 @@ export const POST = handler<Ctx>(async (req, { params }) => {
   if (existing) return json({ message: toMessage(existing.message), runId: existing.id });
 
   const { message, run } = await db.$transaction(async (tx) => {
+    // One active run per chat: lock the chat row so concurrent sends serialize on this check.
+    await tx.$queryRaw`SELECT id FROM "Chat" WHERE id = ${chatId} FOR UPDATE`;
+    const active = await tx.agentRun.findFirst({
+      where: {
+        chatId,
+        status: { in: ["PENDING", "STREAMING"] },
+        // Older than the worker's max duration means a dead lock; don't let it block the chat.
+        createdAt: { gt: new Date(Date.now() - STALE_RUN_MS) },
+      },
+    });
+    if (active) throw new HttpError(409, "A reply is still in progress in this chat. Stop it or wait for it to finish.");
+
     const message = await tx.message.create({
       data: {
         chatId,
