@@ -24,6 +24,7 @@ export async function buildSystemPrompt(): Promise<string> {
     `Available skills:\n${list}`,
     "Files the user uploads appear in their message as `[attachment <mime>] <url>` lines; pass those URLs to tools (image_url, uploadedImages, video_urls).",
     "Keep replies short. Never invent URLs; only use URLs from the user or from tool results.",
+    "Generated images and videos are shown to the user automatically. Never paste their URLs, links or markdown images into your reply; describe the result in one short line instead.",
   ].join("\n\n");
 }
 
