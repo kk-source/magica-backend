@@ -40,6 +40,8 @@ export async function* runAgent(opts: {
   const client = new OpenAI({
     apiKey: OPENROUTER_API_KEY,
     baseURL: "https://openrouter.ai/api/v1",
+    // Free-router models rate-limit often; the SDK backs off on 429/5xx.
+    maxRetries: 4,
     defaultHeaders: { "HTTP-Referer": "https://magica.app", "X-Title": "Magica Agent Chat" },
   });
   const messages: ChatMessage[] = [{ role: "system", content: await buildSystemPrompt() }, ...opts.messages];
