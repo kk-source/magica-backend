@@ -1,17 +1,20 @@
-import { runs } from "@trigger.dev/sdk";
+import { auth, runs } from "@trigger.dev/sdk";
 import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
 import { readContent, type Run, type ToolEvent } from "@/lib/contracts";
 import { HttpError, handler, json } from "@/lib/http";
 import { toToolSteps, totalCredits } from "@/lib/agent/steps";
 
+const TOKEN_TTL = "2h";
+
 const DEAD = new Set(["FAILED", "CRASHED", "SYSTEM_FAILURE", "TIMED_OUT", "EXPIRED", "CANCELED"]);
 
 type Ctx = { params: Promise<{ chatId: string; runId: string }> };
 
 /**
- * Run status for polling. While streaming, live text/tool events come from the Trigger.dev
- * run metadata; once finished, from the persisted assistant message.
+ * Run status. While active it also hands out a read-only Trigger.dev Realtime token so the client
+ * can subscribe to the run's metadata (text, tool steps) instead of polling. Live text/tool events
+ * come from the run metadata while streaming; once finished, from the persisted assistant message.
  */
 export const GET = handler<Ctx>(async (_req, { params }) => {
   const { chatId, runId } = await params;
@@ -38,6 +41,16 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
     if (Array.isArray(meta?.tools)) tools = meta.tools;
   }
 
+  const active = run.status === "PENDING" || run.status === "STREAMING";
+  // Best effort: without a token the client falls back to polling this route.
+  const accessToken =
+    active && run.triggerRunId
+      ? await auth
+          .createPublicToken({ scopes: { read: { runs: [run.triggerRunId] } }, expirationTime: TOKEN_TTL })
+          .catch(() => null)
+      : null;
+  const realtime = accessToken && run.triggerRunId ? { runId: run.triggerRunId, accessToken } : null;
+
   const dto: Run = {
     id: run.id,
     chatId,
@@ -47,6 +60,7 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
     toolSteps: toToolSteps(tools),
     credits: totalCredits(tools),
     error: run.error,
+    realtime,
   };
   return json(dto);
 });

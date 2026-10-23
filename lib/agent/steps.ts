@@ -55,6 +55,8 @@ export function toToolSteps(events: ToolEvent[], now = Date.now()): ToolStep[] {
         label,
         boldArg: keyArg(start.name, start.input),
         elapsedMs: Math.max(0, (end?.at ?? now) - (start.at ?? now)),
+        // Lets the client tick a running step's timer between realtime updates.
+        startedAt: start.at ?? null,
         status: !end ? "running" : end.error ? "failed" : "done",
       };
     });

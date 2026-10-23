@@ -3,7 +3,7 @@ import type OpenAI from "openai";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { runAgent } from "@/lib/agent/loop";
 import { readContent, type ToolEvent } from "@/lib/contracts";
-import { suggestionsFor, totalCredits } from "@/lib/agent/steps";
+import { suggestionsFor, toToolSteps, totalCredits } from "@/lib/agent/steps";
 import { db } from "@/lib/db";
 
 type Payload = { chatId: string; runId: string; userMessageId: string };
@@ -43,6 +43,7 @@ export const agentRun = task({
       lastFlush = Date.now();
       metadata.set("text", text);
       metadata.set("tools", JSON.parse(JSON.stringify(toolEvents)));
+      metadata.set("toolSteps", toToolSteps(toolEvents));
     };
     // Set once the assistant row exists; setup failures before that still mark the run FAILED.
     let assistantId: string | undefined;
