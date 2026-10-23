@@ -22,10 +22,11 @@ function toChatMessages(
         const files = m.attachments.map((a) => `[attachment ${a.mimeType}] ${a.fileUrl}`).join("\n");
         return { role: "user" as const, content: files ? `${text}\n\n${files}` : text };
       }
-      // Keep earlier tool outputs (URLs) visible so follow-ups like "now crop that" can chain.
+      // Keep earlier tool outputs (URLs) visible so follow-ups like "now crop that" can chain. Tagged as
+      // hidden context so the model doesn't imitate them by pasting URLs into its own replies.
       const results = tools
         .filter((t) => t.type === "tool_end" && t.output)
-        .map((t) => `[${t.name} result] ${JSON.stringify(t.output)}`)
+        .map((t) => `<tool_result name="${t.name}" shown_to_user="true">${JSON.stringify(t.output)}</tool_result>`)
         .join("\n");
       return { role: "assistant" as const, content: results ? `${results}\n\n${text}` : text };
     })
