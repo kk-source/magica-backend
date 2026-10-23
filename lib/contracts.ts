@@ -32,6 +32,7 @@ export const ToolStepSchema = z.object({
   label: z.string(),
   boldArg: z.string().nullish(),
   elapsedMs: z.number(),
+  startedAt: z.number().nullish(),
   status: z.enum(["running", "done", "failed"]),
 });
 export type ToolStep = z.infer<typeof ToolStepSchema>;
@@ -61,6 +62,8 @@ export const RunSchema = z.object({
   toolSteps: z.array(ToolStepSchema),
   credits: z.number(),
   error: z.string().nullish(),
+  /** Trigger.dev Realtime subscription for live progress; present while the run is active. */
+  realtime: z.object({ runId: z.string(), accessToken: z.string() }).nullish(),
 });
 export type Run = z.infer<typeof RunSchema>;
 
