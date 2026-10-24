@@ -7,6 +7,9 @@ import { HttpError } from "@/lib/http";
 export async function requireUser() {
   const { userId } = await auth();
   if (!userId) throw new HttpError(401, "Unauthorized");
+  // Plain read on the hot path; an upsert is a write (and a lock) on every API call.
+  const existing = await db.user.findUnique({ where: { clerkId: userId } });
+  if (existing) return existing;
   const credits = env().STARTING_CREDITS;
   return db.user.upsert({
     where: { clerkId: userId },
