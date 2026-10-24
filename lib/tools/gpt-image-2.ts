@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { firstOutputUrl, runMagica, toAppCredits } from "./magica";
-import { defineTool } from "./types";
+import { creditApproval, defineTool } from "./types";
 
 // Magica node gpt_image_2: sub-model picked by whether source images are supplied.
 const SUB_MODEL = { text: "gpt-image-2-text", edit: "gpt-image-2-edit" } as const;
@@ -27,6 +27,8 @@ export const gptImage2 = defineTool({
     aspect_ratio: z.enum(["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "auto"]).optional(),
   }),
   output: z.object({ image_url: z.string().url() }),
+  // Medium quality has cost about 55-70 credits per image in practice.
+  approval: (input) => creditApproval(60, input.input_images?.length ? "Editing this image" : "Generating this image"),
   async execute(input, ctx) {
     const mode = input.input_images?.length ? "edit" : "text";
     const run = await runMagica(

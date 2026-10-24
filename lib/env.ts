@@ -12,6 +12,10 @@ const schema = z.object({
   STARTING_CREDITS: z.coerce.number().int().nonnegative().default(1000),
   /** Minimum balance needed to start a turn; roughly one image generation. */
   MIN_RUN_CREDITS: z.coerce.number().int().nonnegative().default(250),
+  /** Paid tools estimated at or above this many credits ask the user first; 0 always asks. */
+  CREDIT_APPROVAL_MIN: z.coerce.number().int().nonnegative().default(50),
+  /** How long a run waits for an answer before the request expires. */
+  WAITPOINT_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
   MAGICA_API_KEY: z.string().min(1),
   MAGICA_API_BASE_URL: z.string().url().default("https://inference.magica.com/v1"),
   // Optional so the rest of the API runs without uploads configured.

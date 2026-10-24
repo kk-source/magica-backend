@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { firstOutputUrl, runMagica, toAppCredits } from "./magica";
-import { defineTool } from "./types";
+import { creditApproval, defineTool } from "./types";
 
 export const mergeVideos = defineTool({
   name: "merge_videos",
@@ -10,6 +10,8 @@ export const mergeVideos = defineTool({
     transition: z.enum(["none", "fade", "dissolve"]).default("none"),
   }),
   output: z.object({ video_url: z.string().url() }),
+  // Roughly 1 credit per second of output in practice; ~15 for two short clips.
+  approval: (input) => creditApproval(5 * input.video_urls.length, `Merging ${input.video_urls.length} videos`),
   async execute(input, ctx) {
     const run = await runMagica("merge_videos", input, { signal: ctx.signal });
     return {

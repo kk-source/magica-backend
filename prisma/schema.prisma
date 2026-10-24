@@ -17,6 +17,7 @@ enum MessageRole {
 enum MessageStatus {
   PENDING
   STREAMING
+  WAITING
   COMPLETE
   FAILED
   CANCELLED
@@ -25,6 +26,7 @@ enum MessageStatus {
 enum RunStatus {
   PENDING
   STREAMING
+  WAITING
   COMPLETE
   FAILED
   CANCELLED
@@ -157,17 +159,26 @@ model RunSkill {
   @@unique([runId, skillName])
 }
 
+/// A human decision a run is paused on, backed by a Trigger.dev waitpoint token.
 model Waitpoint {
-  id         String          @id @default(cuid())
-  runId      String
-  token      String          @unique
-  type       String
-  status     WaitpointStatus @default(PENDING)
-  expiresAt  DateTime?
-  resolvedAt DateTime?
-  run        AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  id             String          @id @default(cuid())
+  runId          String
+  /// Trigger.dev waitpoint token id.
+  token          String          @unique
+  /// One waitpoint per tool call, so a retried task reuses it instead of asking twice.
+  idempotencyKey String          @unique
+  type           String
+  /// Question, options and cost shown to the user (WaitpointRequest).
+  payload        Json
+  /// The user's answer ({ choice }); written once.
+  response       Json?
+  status         WaitpointStatus @default(PENDING)
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  createdAt      DateTime        @default(now())
+  run            AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
 
-  @@index([runId])
+  @@index([runId, status])
 }
 
 model CreditLedger {
