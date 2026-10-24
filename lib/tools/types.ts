@@ -28,7 +28,7 @@ export const defineTool = <I extends z.ZodType, O extends z.ZodType>(tool: Tool<
 /** Credit approval for a paid tool; skipped when the estimate is under CREDIT_APPROVAL_MIN. */
 export const creditApproval = (estimatedCredits: number, action: string): WaitpointRequest => ({
   type: "credit",
-  question: `${action} will use about ${estimatedCredits} credits. Continue?`,
+  question: `${action} will use about ${(estimatedCredits / 1_000).toFixed(2)}M credits. Continue?`,
   options: ["Approve", "Cancel"],
   cancelChoice: "Cancel",
   estimatedCredits,
