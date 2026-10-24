@@ -35,15 +35,17 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
     // A worker killed without reaching its catch block (crash, timeout, redeploy) leaves the run
     // active forever; reconcile from Trigger.dev and keep whatever it had streamed.
     if (live && DEAD.has(live.status)) {
-      run.status = "FAILED";
-      run.error = "The agent stopped unexpectedly. Please try again.";
+      // A cancel can land on Trigger.dev before the cancel route's DB write; that's a stop, not a crash.
+      const cancelled = live.status === "CANCELED";
+      run.status = cancelled ? "CANCELLED" : "FAILED";
+      run.error = cancelled ? null : "The agent stopped unexpectedly. Please try again.";
       await db.$transaction([
         db.agentRun.update({ where: { id: run.id }, data: { status: run.status, error: run.error } }),
         ...(run.assistantMessageId
           ? [
               db.message.update({
                 where: { id: run.assistantMessageId },
-                data: { status: "FAILED", content: { text, tools } as Prisma.InputJsonValue },
+                data: { status: run.status, content: { text, tools } as Prisma.InputJsonValue },
               }),
             ]
           : []),
