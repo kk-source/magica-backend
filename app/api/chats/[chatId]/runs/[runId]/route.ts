@@ -16,8 +16,9 @@ type Ctx = { params: Promise<{ chatId: string; runId: string }> };
  * Run status. While active it also hands out a read-only Trigger.dev Realtime token so the client
  * can subscribe to the run's metadata (text, tool steps) instead of polling. Live text/tool events
  * come from the run metadata while streaming; once finished, from the persisted assistant message.
+ * Clients already subscribed pass `?realtime=0` to skip minting another token.
  */
-export const GET = handler<Ctx>(async (_req, { params }) => {
+export const GET = handler<Ctx>(async (req, { params }) => {
   const { chatId, runId } = await params;
   const user = await requireUser();
   await requireChat(user.id, chatId);
@@ -63,8 +64,9 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
         })
       : null;
   // Best effort: without a token the client falls back to polling this route.
+  const wantsToken = new URL(req.url).searchParams.get("realtime") !== "0";
   const accessToken =
-    active && run.triggerRunId
+    active && wantsToken && run.triggerRunId
       ? await auth
           .createPublicToken({ scopes: { read: { runs: [run.triggerRunId] } }, expirationTime: TOKEN_TTL })
           .catch(() => null)
