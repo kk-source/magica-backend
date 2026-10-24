@@ -75,9 +75,29 @@ export const agentRun = task({
       metadata.set("assistantMessageId", assistant.id);
       metadata.set("status", "STREAMING");
 
+      // Paused on the user: the DB says WAITING (durable), metadata carries the request to live clients.
+      const setWaiting = async (waiting: boolean) => {
+        const status = waiting ? "WAITING" : "STREAMING";
+        await db.$transaction([
+          db.agentRun.update({ where: { id: runId }, data: { status } }),
+          db.message.update({ where: { id: assistant.id }, data: { status } }),
+        ]);
+        metadata.set("status", status);
+      };
+
       for await (const ev of runAgent({ messages: toChatMessages(history.reverse()), runId, signal })) {
         if (ev.type === "text") text += ev.delta;
-        else if (ev.type !== "done") toolEvents.push(ev);
+        else if (ev.type === "waitpoint") {
+          await setWaiting(true);
+          metadata.set("waitpoint", ev.waitpoint);
+          flush(true);
+          // Push it out before the task checkpoints.
+          await metadata.flush();
+          continue;
+        } else if (ev.type === "waitpoint_end") {
+          await setWaiting(false);
+          metadata.del("waitpoint");
+        } else if (ev.type !== "done") toolEvents.push(ev);
         flush(ev.type !== "text");
       }
       flush(true);

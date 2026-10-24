@@ -2,7 +2,7 @@ import { auth, runs } from "@trigger.dev/sdk";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
-import { readContent, type Run, type ToolEvent } from "@/lib/contracts";
+import { isActiveRun, readContent, toWaitpoint, type Run, type ToolEvent } from "@/lib/contracts";
 import { HttpError, handler, json } from "@/lib/http";
 import { toToolSteps, totalCredits } from "@/lib/agent/steps";
 
@@ -26,7 +26,7 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
 
   let { text, tools = [] } = run.assistantMessage ? readContent(run.assistantMessage.content) : { text: "", tools: [] };
 
-  if ((run.status === "PENDING" || run.status === "STREAMING") && run.triggerRunId) {
+  if (isActiveRun(run.status) && run.triggerRunId) {
     const live = await runs.retrieve(run.triggerRunId).catch(() => null);
     const meta = live?.metadata as { text?: string; tools?: ToolEvent[] } | undefined;
     if (typeof meta?.text === "string") text = meta.text;
@@ -53,7 +53,15 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
     }
   }
 
-  const active = run.status === "PENDING" || run.status === "STREAMING";
+  const active = isActiveRun(run.status);
+  // The pending question comes from Postgres, so it survives reloads and missed realtime updates.
+  const waitpoint =
+    run.status === "WAITING"
+      ? await db.waitpoint.findFirst({
+          where: { runId: run.id, status: "PENDING", expiresAt: { gt: new Date() } },
+          orderBy: { createdAt: "desc" },
+        })
+      : null;
   // Best effort: without a token the client falls back to polling this route.
   const accessToken =
     active && run.triggerRunId
@@ -73,6 +81,7 @@ export const GET = handler<Ctx>(async (_req, { params }) => {
     credits: totalCredits(tools),
     error: run.error,
     realtime,
+    waitpoint: waitpoint ? toWaitpoint(waitpoint) : null,
   };
   return json(dto);
 });

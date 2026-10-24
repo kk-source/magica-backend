@@ -41,6 +41,15 @@ The UI lives in a separate repo: [magica-frontend](https://github.com/kk-source/
 3. `GET /api/chats/:id/runs/:runId` returns the run status and, while it is active, a short-lived Realtime token `{ runId, accessToken }`. The frontend subscribes to the run directly, with a slow safety poll as a fallback.
 4. On finish the task saves the assistant message (text, tool steps, media, credit cost, suggested follow-ups), records each `ToolInvocation`, and debits the user's credits in a `CreditLedger` entry. Failures and cancels mark the run `FAILED` / `CANCELLED`.
 
+### Human waitpoints
+
+A run can pause for the user and resume exactly once (`lib/agent/waitpoints.ts`):
+
+- **Credit approval.** A tool can declare `approval(input)`. `gpt_image_2` asks "Generating this image will use about 60 credits. Continue?" when the estimate is at least `CREDIT_APPROVAL_MIN`. Picking *Cancel* skips the tool and tells the model the user declined.
+- **Options.** The `ask_user` tool lets the model offer 2 to 4 choices (also used to approve a plan) and continues with the answer.
+
+The task creates a Trigger.dev token (`wait.createToken`, idempotency key `runId:toolCallId`), stores a `Waitpoint` row (question, options, expiry), marks the run and reply `WAITING`, then suspends on `wait.forToken`, so no compute is used while waiting. `GET /runs/:runId` returns the open `waitpoint` from Postgres, so it survives reloads. `POST /api/chats/:chatId/waitpoints/:id { choice }` resolves it with a conditional `PENDING → RESOLVED` update: only the first answer completes the token, and duplicate submits get the stored answer back. Unanswered requests expire after `WAITPOINT_TIMEOUT_MINUTES`: the row becomes `EXPIRED`, and the turn ends with a note telling the user to send the message again. Cancelling a run expires its open waitpoints.
+
 ### API
 
 All routes require a Clerk session token (`Authorization: Bearer …`) and return JSON. CORS allows only `FRONTEND_ORIGIN`.
@@ -52,6 +61,7 @@ All routes require a Clerk session token (`Authorization: Bearer …`) and retur
 | GET / POST | `/api/chats/:chatId/messages` | List messages / send a message and start a run |
 | GET | `/api/chats/:chatId/runs/:runId` | Run status, live text, tool steps, Realtime token |
 | POST | `/api/chats/:chatId/runs/:runId/cancel` | Cancel a running agent |
+| POST | `/api/chats/:chatId/waitpoints/:waitpointId` | Answer a paused run's question `{ choice }` (idempotent) |
 | GET | `/api/me` | Current user and credit balance |
 | POST | `/api/uploads/params` | Signed Transloadit Assembly params |
 
@@ -121,6 +131,8 @@ Then start the frontend on http://localhost:3000 with `NEXT_PUBLIC_BACKEND_URL=h
 | `OPENROUTER_MODEL` | no | Defaults to `openrouter/free`. Only `openrouter/free` or a `:free` model is accepted; anything else fails env validation |
 | `STARTING_CREDITS` | no | Credits granted at signup (default 1000) |
 | `MIN_RUN_CREDITS` | no | Balance needed to start a turn (default 250) |
+| `CREDIT_APPROVAL_MIN` | no | Paid tools estimated at or above this many credits ask for approval first (default 50; 0 always asks) |
+| `WAITPOINT_TIMEOUT_MINUTES` | no | How long a paused run waits for an answer (default 15) |
 | `MAGICA_API_KEY` | yes | Magica key (`gx_…`) |
 | `MAGICA_API_BASE_URL` | no | Defaults to `https://inference.magica.com/v1` |
 | `TRANSLOADIT_KEY` / `TRANSLOADIT_SECRET` | for uploads | Without them `/api/uploads/params` returns 503 and the rest still works |

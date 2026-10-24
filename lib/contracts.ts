@@ -4,8 +4,28 @@ import { toToolSteps, totalCredits } from "@/lib/agent/steps";
 
 // HTTP contract. Mirrors magica-frontend lib/api/schemas.ts — keep the two in sync.
 
-export const RunStatusSchema = z.enum(["PENDING", "STREAMING", "COMPLETE", "FAILED", "CANCELLED"]);
+export const RunStatusSchema = z.enum(["PENDING", "STREAMING", "WAITING", "COMPLETE", "FAILED", "CANCELLED"]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
+export const ACTIVE_RUN_STATUSES = ["PENDING", "STREAMING", "WAITING"] as const satisfies RunStatus[];
+export const isActiveRun = (s: string) => (ACTIVE_RUN_STATUSES as readonly string[]).includes(s);
+
+/** What a run asks the user when it pauses on a waitpoint (stored in Waitpoint.payload). */
+export const WaitpointRequestSchema = z.object({
+  type: z.enum(["credit", "options"]),
+  question: z.string(),
+  options: z.array(z.string()).min(2).max(4),
+  /** Picking this option skips the tool instead of running it. */
+  cancelChoice: z.string().optional(),
+  estimatedCredits: z.number().optional(),
+});
+export type WaitpointRequest = z.infer<typeof WaitpointRequestSchema>;
+
+/** A pending waitpoint as the client sees it. */
+export const WaitpointSchema = WaitpointRequestSchema.omit({ cancelChoice: true }).extend({
+  id: z.string(),
+  expiresAt: z.string(),
+});
+export type Waitpoint = z.infer<typeof WaitpointSchema>;
 
 export const ChatSchema = z.object({
   id: z.string(),
@@ -64,6 +84,8 @@ export const RunSchema = z.object({
   error: z.string().nullish(),
   /** Trigger.dev Realtime subscription for live progress; present while the run is active. */
   realtime: z.object({ runId: z.string(), accessToken: z.string() }).nullish(),
+  /** Set while the run is WAITING on the user. */
+  waitpoint: WaitpointSchema.nullish(),
 });
 export type Run = z.infer<typeof RunSchema>;
 
@@ -89,12 +111,19 @@ export const SendMessageBody = z.object({
   idempotencyKey: z.string().min(8).max(128).optional(),
 });
 
+export const AnswerWaitpointBody = z.object({ choice: z.string().min(1).max(80) });
+
 export const MessagesQuery = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 // ---- Mappers ----
+
+export const toWaitpoint = (w: { id: string; payload: Prisma.JsonValue; expiresAt: Date }): Waitpoint => {
+  const { cancelChoice: _, ...req } = WaitpointRequestSchema.parse(w.payload);
+  return { ...req, id: w.id, expiresAt: w.expiresAt.toISOString() };
+};
 
 /** Stored message content shape (Message.content JSON column). */
 export type StoredContent = { text: string; tools?: ToolEvent[]; suggestions?: string[] };

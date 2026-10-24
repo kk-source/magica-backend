@@ -2,8 +2,10 @@ import OpenAI from "openai";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import { toWaitpoint, type Waitpoint } from "@/lib/contracts";
 import { listSkills } from "@/lib/skills/registry";
 import { toolDefinitions, toolsByName } from "@/lib/tools/registry";
+import { awaitAnswer, needsAnswer, openWaitpoint } from "./waitpoints";
 
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
@@ -11,7 +13,12 @@ export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "tool_start"; id: string; name: string; input: unknown; at: number }
   | { type: "tool_end"; id: string; name: string; output?: unknown; error?: string; at: number; creditCost?: number }
+  | { type: "waitpoint"; waitpoint: Waitpoint }
+  | { type: "waitpoint_end"; id: string }
   | { type: "done"; text: string };
+
+export const EXPIRED_TEXT =
+  "This request expired before you answered, so I stopped here. Send your message again whenever you're ready to continue.";
 
 const MAX_STEPS = 10;
 
@@ -87,9 +94,21 @@ export async function* runAgent(opts: {
       })),
     });
 
+    let expired = false;
     for (const call of calls.values()) {
-      const result = yield* executeTool(call, opts.runId, opts.signal);
+      const { result, stop } = yield* executeTool(call, opts.runId, opts.signal);
+      if (stop) {
+        expired = true;
+        break;
+      }
       messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+    }
+    // An unanswered waitpoint ends the turn; nothing after it ran.
+    if (expired) {
+      const delta = (finalText ? "\n\n" : "") + EXPIRED_TEXT;
+      finalText += delta;
+      yield { type: "text", delta };
+      break;
     }
   }
 
@@ -100,16 +119,34 @@ async function* executeTool(
   call: { id: string; name: string; args: string },
   runId: string,
   signal?: AbortSignal,
-): AsyncGenerator<AgentEvent, unknown> {
+): AsyncGenerator<AgentEvent, { result: unknown; stop?: boolean }> {
   let rawInput: unknown;
   try {
     rawInput = JSON.parse(call.args || "{}");
   } catch {
     rawInput = call.args;
   }
+  const tool = toolsByName.get(call.name);
+
+  // Human waitpoint before the tool runs (credit approval, options). Invalid input skips straight
+  // to the normal error path below.
+  let choice: string | undefined;
+  const parsed = tool?.input.safeParse(rawInput);
+  const request = tool?.approval && parsed?.success ? tool.approval(parsed.data) : null;
+  if (request && needsAnswer(request)) {
+    const wp = await openWaitpoint(runId, call.id, request);
+    yield { type: "waitpoint", waitpoint: toWaitpoint(wp) };
+    const answer = await awaitAnswer(wp);
+    yield { type: "waitpoint_end", id: wp.id };
+    if (answer === null) return { result: null, stop: true };
+    if (answer === request.cancelChoice) {
+      return { result: { declined: true, note: "The user declined this step. Don't retry it; acknowledge briefly." } };
+    }
+    choice = answer;
+  }
+
   yield { type: "tool_start", id: call.id, name: call.name, input: rawInput, at: Date.now() };
 
-  const tool = toolsByName.get(call.name);
   const invocation = await db.toolInvocation.create({
     data: { runId, toolName: call.name, input: rawInput as Prisma.InputJsonValue, status: "RUNNING" },
   });
@@ -118,7 +155,7 @@ async function* executeTool(
   try {
     if (!tool) throw new Error(`Unknown tool: ${call.name}`);
     const input = tool.input.parse(rawInput);
-    const { output, magicaRunId, creditCost = 0 } = await tool.execute(input, { runId, signal });
+    const { output, magicaRunId, creditCost = 0 } = await tool.execute(input, { runId, signal, choice });
 
     if (tool.name === "load_skill") {
       const o = output as { name: string; contentHash: string };
@@ -139,7 +176,7 @@ async function* executeTool(
       },
     });
     yield { type: "tool_end", id: call.id, name: call.name, output, creditCost, at: Date.now() };
-    return output;
+    return { result: output };
   } catch (err) {
     // Errors go back to the model as tool results so it can recover or explain.
     const error = err instanceof Error ? err.message : String(err);
@@ -148,6 +185,6 @@ async function* executeTool(
       data: { status: "FAILED", output: { error }, durationMs: Date.now() - started },
     });
     yield { type: "tool_end", id: call.id, name: call.name, error, at: Date.now() };
-    return { error };
+    return { result: { error } };
   }
 }

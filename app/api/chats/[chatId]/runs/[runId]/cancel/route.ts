@@ -31,6 +31,8 @@ export const POST = handler<Ctx>(async (_req, { params }) => {
     run.triggerRunId ? runs.cancel(run.triggerRunId).catch(() => null) : null,
     db.$transaction([
       db.agentRun.update({ where: { id: runId }, data: { status: "CANCELLED" } }),
+      // Close any open question so a late answer can't resume a stopped run.
+      db.waitpoint.updateMany({ where: { runId, status: "PENDING" }, data: { status: "EXPIRED" } }),
       ...(run.assistantMessageId
         ? [db.message.update({ where: { id: run.assistantMessageId }, data: { status: "CANCELLED", content } })]
         : []),

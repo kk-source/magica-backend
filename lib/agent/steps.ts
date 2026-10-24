@@ -5,6 +5,7 @@ import type { ToolEvent, ToolStep } from "@/lib/contracts";
 const LABELS: Record<string, string> = {
   load_skill: "Loading skill",
   read_skill_asset: "Reading skill file",
+  ask_user: "Asking you",
   crop_image: "Cropping image",
   gpt_image_2: "Generating image",
   merge_videos: "Merging videos",
@@ -14,6 +15,7 @@ const LABELS: Record<string, string> = {
 const DONE_LABELS: Record<string, string> = {
   load_skill: "Loaded skill",
   read_skill_asset: "Read skill file",
+  ask_user: "Asked you",
   crop_image: "Cropped image",
   gpt_image_2: "Generated image",
   merge_videos: "Merged videos",
@@ -28,6 +30,8 @@ function keyArg(name: string, input: unknown): string | null {
       return typeof i.name === "string" ? i.name : null;
     case "read_skill_asset":
       return typeof i.path === "string" ? i.path : null;
+    case "ask_user":
+      return typeof i.question === "string" ? truncate(i.question) : null;
     case "crop_image":
       return typeof i.aspect_ratio === "string" ? i.aspect_ratio : i.region || i.crop ? "custom area" : null;
     case "gpt_image_2":

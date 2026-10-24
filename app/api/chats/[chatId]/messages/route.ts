@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { tasks } from "@trigger.dev/sdk";
 import { db } from "@/lib/db";
 import { requireChat, requireUser } from "@/lib/auth";
-import { MessagesQuery, SendMessageBody, messageInclude, toMessage } from "@/lib/contracts";
+import { ACTIVE_RUN_STATUSES, MessagesQuery, SendMessageBody, messageInclude, toMessage } from "@/lib/contracts";
 import { env } from "@/lib/env";
 import { HttpError, handler, json, parseBody, parseQuery } from "@/lib/http";
 import type { agentRun } from "@/trigger/agent-run";
 
 type Ctx = { params: Promise<{ chatId: string }> };
 
-/** Trigger.dev maxDuration (15 min) plus slack. */
+/** Trigger.dev maxDuration (15 min) plus slack, measured from the run's last status change. */
 const STALE_RUN_MS = 20 * 60_000;
 
 /**
@@ -77,9 +77,10 @@ export const POST = handler<Ctx>(async (req, { params }) => {
     const active = await tx.agentRun.findFirst({
       where: {
         chatId,
-        status: { in: ["PENDING", "STREAMING"] },
-        // Older than the worker's max duration means a dead lock; don't let it block the chat.
-        createdAt: { gt: new Date(Date.now() - STALE_RUN_MS) },
+        status: { in: [...ACTIVE_RUN_STATUSES] },
+        // Untouched for longer than the worker's max duration (or a waitpoint's timeout) means a dead
+        // lock; don't let it block the chat. Entering and leaving WAITING bumps updatedAt.
+        updatedAt: { gt: new Date(Date.now() - Math.max(STALE_RUN_MS, (env().WAITPOINT_TIMEOUT_MINUTES + 5) * 60_000)) },
       },
     });
     if (active) throw new HttpError(409, "A reply is still in progress in this chat. Stop it or wait for it to finish.");
