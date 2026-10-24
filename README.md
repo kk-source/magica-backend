@@ -177,8 +177,21 @@ Import the repo into Vercel (framework: Next.js; build command `pnpm build` runs
 - **Postgres is the source of truth.** Realtime only carries live progress; the final message, tool calls and credits are written to the database, so a refresh always shows the right state.
 - **Idempotent sends.** The idempotency key is unique on `AgentRun` and is also passed to Trigger.dev, so double clicks and retries never start two runs.
 - **Credits debited after the run** from Magica's reported `creditUsed`, in the same transaction as a ledger row. Simple and auditable; a user could overdraw by one run, which is acceptable here.
+- **Message content as JSON.** `Message.content` is a `Json` column holding text, tool steps, media and follow-ups as one typed blob (validated by Zod on write and read). One row per turn keeps reads to a single query and lets the UI shape evolve without migrations; the trade-off is that individual tool steps can't be queried in SQL, which is why `ToolInvocation` rows are stored alongside for auditing.
+- **Waitpoints instead of polling for input.** Paused runs suspend on a Trigger.dev token, so waiting for a human costs no compute, and a conditional update in Postgres guarantees the run resumes exactly once.
 - **Lazy skills.** Only skill names and descriptions go into the prompt, keeping context small on free models. Bodies load on demand.
 - **Free LLM tier.** Cheap but slower and less reliable at tool calling. The loop is capped at 10 steps and tool errors are returned to the model so it can recover.
 - **Shared contract by convention.** Two repos mean no shared package, so `lib/contracts.ts` and the frontend's `lib/api/schemas.ts` are kept in sync by hand. Zod on both ends makes drift fail loudly.
 - **Uploads go straight to Transloadit.** Files never pass through Vercel (body size limits); the API only signs Assembly params so clients cannot run arbitrary robots on the account.
 - **Out of scope for the timeline:** automated tests, docs site, webhooks and an MCP server.
+
+## What I'd improve with more time
+
+- **Tests.** Unit tests for the agent loop, tool input schemas and waitpoint resolution; an integration test that drives a full run against a mocked OpenRouter and Magica.
+- **Credit reservation.** Reserve the estimated cost before a paid tool runs and settle afterwards, so a user can't overdraw by a run.
+- **Parallel tool calls and child tasks.** Run independent tool calls concurrently and move each Magica call into its own Trigger.dev child task with its own retries and timeout.
+- **Reasoning stream and usage tracking.** Stream the model's thinking and record the routed model and token usage per run.
+- **Rate limiting** per user on message sends and uploads.
+- **Chat search and pagination.** Full-text search across chats and cursor-based paging of older messages.
+- **Public API docs** (Mintlify), webhooks for run completion, and an MCP server exposing the same tools.
+- **Shared contract package** so the frontend and backend Zod schemas come from one source instead of being mirrored by hand.
